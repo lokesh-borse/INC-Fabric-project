@@ -1,0 +1,381 @@
+{
+  "properties": {
+    "activities": [
+      {
+        "type": "Lookup",
+        "typeProperties": {
+          "source": {
+            "type": "DataWarehouseSource",
+            "sqlReaderQuery": "SELECT\n    sc.SourceID,\n    sc.SourceSystem,\n    sc.SourceSchema,\n    sc.SourceTable,\n    sc.LoadType,\n    sc.WatermarkColumn,\n    sc.DestinationLayer,\n    sc.DestinationTable,\n    wc.LastWatermarkValue\nFROM control_schema.source_config sc\nINNER JOIN control_schema.watermark_control wc\n    ON sc.SourceID = wc.SourceID\nWHERE sc.IsActive = 1;",
+            "partitionOption": "None",
+            "queryTimeout": "02:00:00"
+          },
+          "datasetSettings": {
+            "type": "DataWarehouseTable",
+            "schema": [],
+            "linkedService": {
+              "name": "SalesDW",
+              "properties": {
+                "type": "DataWarehouse",
+                "typeProperties": {
+                  "artifactId": "ac6d0ac7-3c78-9b24-4d22-bf0de2704526",
+                  "endpoint": "hvjc2nbaozwe3jxx6iktco3hyy-xlwqwwrueb7ujnsp6nbilvvxly.datawarehouse.fabric.microsoft.com",
+                  "workspaceId": "00000000-0000-0000-0000-000000000000"
+                },
+                "annotations": []
+              }
+            },
+            "annotations": []
+          },
+          "firstRowOnly": false
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Lookup1",
+        "dependsOn": []
+      },
+      {
+        "type": "ForEach",
+        "typeProperties": {
+          "isSequential": true,
+          "items": {
+            "value": "@activity('Lookup1').output.value",
+            "type": "Expression"
+          },
+          "activities": [
+            {
+              "type": "SqlServerStoredProcedure",
+              "typeProperties": {
+                "storedProcedureName": "[control_schema].[sp_pipeline_audit_start]",
+                "storedProcedureParameters": {
+                  "PipelineName": {
+                    "value": "master_pipeline",
+                    "type": "String"
+                  },
+                  "SourceTable": {
+                    "value": {
+                      "value": "@item().SourceTable",
+                      "type": "Expression"
+                    },
+                    "type": "String"
+                  },
+                  "LoadType": {
+                    "value": {
+                      "value": "@item().LoadType",
+                      "type": "Expression"
+                    },
+                    "type": "String"
+                  },
+                  "PipelineRunId": {
+                    "value": {
+                      "value": "@pipeline().RunId",
+                      "type": "Expression"
+                    },
+                    "type": "String"
+                  },
+                  "TriggeredBy": {
+                    "value": "Fabric Pipeline",
+                    "type": "String"
+                  },
+                  "AuditID": {
+                    "value": {
+                      "value": "@guid()",
+                      "type": "Expression"
+                    },
+                    "type": "Guid"
+                  }
+                }
+              },
+              "linkedService": {
+                "name": "SalesDW",
+                "properties": {
+                  "type": "DataWarehouse",
+                  "typeProperties": {
+                    "artifactId": "ac6d0ac7-3c78-9b24-4d22-bf0de2704526",
+                    "endpoint": "hvjc2nbaozwe3jxx6iktco3hyy-xlwqwwrueb7ujnsp6nbilvvxly.datawarehouse.fabric.microsoft.com",
+                    "workspaceId": "00000000-0000-0000-0000-000000000000"
+                  },
+                  "annotations": []
+                }
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "sp_start",
+              "dependsOn": []
+            },
+            {
+              "type": "Copy",
+              "typeProperties": {
+                "source": {
+                  "type": "AzureSqlSource",
+                  "sqlReaderQuery": {
+                    "value": "@concat(\n'SELECT * FROM dbo.',\nitem().SourceTable,\n' WHERE LastModifiedDate > ''',\nitem().LastWatermarkValue,\n''''\n)",
+                    "type": "Expression"
+                  },
+                  "partitionOption": "None",
+                  "queryTimeout": "02:00:00",
+                  "datasetSettings": {
+                    "type": "AzureSqlTable",
+                    "typeProperties": {
+                      "schema": "dbo",
+                      "table": {
+                        "value": "@item().SourceTable",
+                        "type": "Expression"
+                      },
+                      "database": "SalesDB"
+                    },
+                    "schema": [],
+                    "externalReferences": {
+                      "connection": "bd986c9d-9e2c-4706-9542-1d3313857cf4"
+                    },
+                    "annotations": []
+                  }
+                },
+                "sink": {
+                  "type": "LakehouseTableSink",
+                  "tableActionOption": "Append",
+                  "applyVOrder": false,
+                  "partitionOption": "None",
+                  "datasetSettings": {
+                    "type": "LakehouseTable",
+                    "typeProperties": {
+                      "schema": "bronze",
+                      "table": {
+                        "value": "@item().DestinationTable",
+                        "type": "Expression"
+                      }
+                    },
+                    "schema": [],
+                    "linkedService": {
+                      "name": "SalesLakehouse",
+                      "properties": {
+                        "type": "Lakehouse",
+                        "typeProperties": {
+                          "artifactId": "8330466e-644b-ac3c-43df-b88e7c7e4dc7",
+                          "workspaceId": "00000000-0000-0000-0000-000000000000",
+                          "rootFolder": "Tables"
+                        },
+                        "annotations": []
+                      }
+                    },
+                    "annotations": []
+                  }
+                },
+                "translator": {
+                  "type": "TabularTranslator",
+                  "typeConversion": true,
+                  "typeConversionSettings": {
+                    "allowDataTruncation": true,
+                    "treatBooleanAsNumber": false
+                  }
+                },
+                "enableStaging": false
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "src_to_bronze",
+              "dependsOn": [
+                {
+                  "activity": "sp_start",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "Lookup",
+              "typeProperties": {
+                "source": {
+                  "type": "AzureSqlSource",
+                  "sqlReaderQuery": {
+                    "value": "@concat(\n'SELECT MAX(',\nitem().WatermarkColumn,\n') AS MaxWatermark\nFROM ',\nitem().SourceSchema,\n'.',\nitem().SourceTable,\n' WHERE ',\nitem().WatermarkColumn,\n' > ''',\nitem().LastWatermarkValue,\n''''\n)",
+                    "type": "Expression"
+                  },
+                  "partitionOption": "None",
+                  "queryTimeout": "02:00:00"
+                },
+                "datasetSettings": {
+                  "type": "AzureSqlTable",
+                  "typeProperties": {
+                    "database": "SalesDB"
+                  },
+                  "schema": [],
+                  "externalReferences": {
+                    "connection": "bd986c9d-9e2c-4706-9542-1d3313857cf4"
+                  },
+                  "annotations": []
+                },
+                "firstRowOnly": true
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "Lookup_MaxWatermark",
+              "dependsOn": [
+                {
+                  "activity": "src_to_bronze",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "SqlServerStoredProcedure",
+              "typeProperties": {
+                "storedProcedureName": "[control_schema].[sp_update_watermark]",
+                "storedProcedureParameters": {
+                  "SourceTable": {
+                    "value": {
+                      "value": "@item().SourceTable",
+                      "type": "Expression"
+                    },
+                    "type": "String"
+                  },
+                  "LastWatermarkValue": {
+                    "value": {
+                      "value": "@activity('Lookup_MaxWatermark').output.firstRow.MaxWatermark",
+                      "type": "Expression"
+                    },
+                    "type": "Datetime"
+                  },
+                  "PipelineRunId": {
+                    "value": {
+                      "value": "@pipeline().RunId",
+                      "type": "Expression"
+                    },
+                    "type": "String"
+                  }
+                }
+              },
+              "linkedService": {
+                "name": "SalesDW",
+                "properties": {
+                  "type": "DataWarehouse",
+                  "typeProperties": {
+                    "artifactId": "ac6d0ac7-3c78-9b24-4d22-bf0de2704526",
+                    "endpoint": "hvjc2nbaozwe3jxx6iktco3hyy-xlwqwwrueb7ujnsp6nbilvvxly.datawarehouse.fabric.microsoft.com",
+                    "workspaceId": "00000000-0000-0000-0000-000000000000"
+                  },
+                  "annotations": []
+                }
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "sp_watermark_update",
+              "dependsOn": [
+                {
+                  "activity": "Lookup_MaxWatermark",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "SqlServerStoredProcedure",
+              "typeProperties": {
+                "storedProcedureName": "[control_schema].[sp_pipeline_audit_end]",
+                "storedProcedureParameters": {
+                  "PipelineRunId": {
+                    "value": {
+                      "value": "@pipeline().RunId",
+                      "type": "Expression"
+                    },
+                    "type": "String"
+                  },
+                  "Status": {
+                    "value": "Success",
+                    "type": "String"
+                  },
+                  "RowsCopied": {
+                    "value": {
+                      "value": "@activity('src_to_bronze').output.rowsCopied",
+                      "type": "Expression"
+                    },
+                    "type": "Int64"
+                  },
+                  "RowsRejected": {
+                    "value": "0",
+                    "type": "Int64"
+                  },
+                  "ErrorMessage": {
+                    "value": "' '",
+                    "type": "String"
+                  }
+                }
+              },
+              "linkedService": {
+                "name": "SalesDW",
+                "properties": {
+                  "type": "DataWarehouse",
+                  "typeProperties": {
+                    "artifactId": "ac6d0ac7-3c78-9b24-4d22-bf0de2704526",
+                    "endpoint": "hvjc2nbaozwe3jxx6iktco3hyy-xlwqwwrueb7ujnsp6nbilvvxly.datawarehouse.fabric.microsoft.com",
+                    "workspaceId": "00000000-0000-0000-0000-000000000000"
+                  },
+                  "annotations": []
+                }
+              },
+              "policy": {
+                "timeout": "0.12:00:00",
+                "retry": 0,
+                "retryIntervalInSeconds": 30,
+                "secureInput": false,
+                "secureOutput": false
+              },
+              "name": "sp_end",
+              "dependsOn": [
+                {
+                  "activity": "sp_watermark_update",
+                  "dependencyConditions": [
+                    "Succeeded"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        "name": "ForEach1",
+        "dependsOn": [
+          {
+            "activity": "Lookup1",
+            "dependencyConditions": [
+              "Succeeded"
+            ]
+          }
+        ]
+      }
+    ],
+    "variables": {
+      "IncrementalQuery": {
+        "type": "String"
+      }
+    }
+  }
+}
